@@ -1,8 +1,7 @@
-setwd("/Volumes/EM2T/Lancaster/Nutrition/SERF/nutrient_value/dag-based")
+#libraries
+library(here)
 library(ggplot2)
 library(tidyverse)
-#library(mapdata)
-library(plot3D)
 library(RColorBrewer)
 library(patchwork)
 library(viridis)
@@ -11,9 +10,13 @@ library(gridExtra)
 library(ggExtra)
 library(cowplot)
 
+here()
+
 load('dat.RData')
 head(dat)
 dat <- dat[-which(dat$BWnut3A==0),]
+
+#customized theme 
 thememap<-theme(axis.text=element_text(colour="black"),
                 axis.ticks=element_line(colour="black"),
                 panel.grid.minor=element_blank(),
