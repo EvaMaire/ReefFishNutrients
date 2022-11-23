@@ -11,7 +11,6 @@
 library(bayestestR)
 library(brms)
 library(bayesplot)
-library(performance) #remove?
 library(parallel)
 library(rstan)
 library(tidyverse)
