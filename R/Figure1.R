@@ -37,7 +37,7 @@ quantile(dat$nutrient_score,probs = seq(0,1,.1))
 nsq1 <- quantile(dat$nutrient_score,probs = seq(0,1,.1))[2]
 nsq2 <- quantile(dat$nutrient_score,probs = seq(0,1,.1))[10]
 
-nutscoreR2 <- ggplot() +
+nutscore <- ggplot() +
   geom_polygon(data = mapWorld, aes(x=long, y = lat, group = group),fill = "grey", color = "grey") +
   coord_fixed(xlim = c(30, 320),  ylim = c(-30, 30), ratio = 1.3)+
   #first highest values - top quartile
@@ -63,14 +63,26 @@ nutscoreR2 <- ggplot() +
                                            legend.title = element_text(size=12 ,face="bold")#,legend.margin=margin(l=-3))
   )
 
-nutscoreR2 
+nutscore 
 
-#legend
+#Customise legend
+white_themejpg <-theme(axis.ticks=element_line(colour="black"),
+                       axis.text=element_text(size=12,colour="black"),
+                       axis.title=element_text(size=14),
+                       panel.grid.minor=element_blank(),
+                       panel.grid.major=element_blank(),
+                       axis.line = element_line(color = 'black'),
+                       panel.background=element_rect(fill="white",colour=NA),
+                       #plot.background=element_rect(fill="transparent",colour=NA),
+                       panel.border = element_blank(),
+                       legend.key = element_rect(fill = "white"),
+                       plot.title = element_text(hjust = 0.5))
+
 level_order <- c("Indian Ocean","Indo-Pacific","Central Pacific","Western Atlantic")
 
 dat$region <- factor(dat$region, levels=level_order)
 
-reg.cols2 <-c('cCentral Pacific'='#ffa31a', 'bIndo-Pacific'='#800a33', 'dWestern Atlantic'='#120b96', 'aIndian Ocean'='#0f7280')
+reg.cols <-c('cCentral Pacific'='#ffa31a', 'bIndo-Pacific'='#800a33', 'dWestern Atlantic'='#120b96', 'aIndian Ocean'='#0f7280')
 
 pleg <- ggplot(dat, aes(nutrient_score, fill = factor(region, levels=c("Indian Ocean","Indo-Pacific","Central Pacific","Western Atlantic")),
                         color= factor(region, levels=c("Indian Ocean","Indo-Pacific","Central Pacific","Western Atlantic")) )) +
@@ -83,57 +95,31 @@ pleg <- ggplot(dat, aes(nutrient_score, fill = factor(region, levels=c("Indian O
   white_themejpg
 
 
-#p <- pleg2 + guides(colour = guide_colourbar(order=1),
-#size = guide_legend(order=2))
 legend <- get_legend(
   pleg + 
     theme(legend.position = "top",legend.justification = "center",legend.direction = "horizontal",
           legend.text=element_text(size=14),legend.title = element_text(size=18 ,face="bold"),legend.key.width = unit(3,"line"))
 )
 
-#biplot
-#Color scale
-cols=c("Fished"="#d4d4d4","Restricted"="#595959","UnfishedHigh" = "#171717")
-
-dat$alpha <- rep(0.9,nrow(dat))
-dat$alpha[which(dat$Protection=="Fished")] <- .7
-
-bmnut <- ggplot(dat ,aes(y=nutrient_score, x=logbm,fill=region) ) +
-  geom_point(alpha=dat$alpha,shape = 21,color="dark grey",size=2)+
-  stat_smooth(aes(fill=region,color=region),method = 'lm', #formula = y ~ splines::bs(x, 3),#"gam",formula = y ~ s(x, k = 3),
-              se=T,fullrange = F,linetype = "dashed",size=1,show.legend = F) +
-  #geom_segment(aes(x = 50, y = 0, xend = 50 , yend =100),linetype="dashed",size=0.5,color="darkgrey")+
-  #geom_segment(aes(x = 0, y = 50, xend = 100 , yend =50),linetype="dashed",size=0.5,color="darkgrey")+
-  scale_y_continuous(name = "Average nutrient density score, %",limits=c(15,102)) +
-  scale_x_continuous(name = "Log fish biomass") +
-  scale_fill_manual(values=reg.cols)+
-  scale_color_manual(values=reg.cols)+
-  #scale_color_brewer(palette="Greys")+
-  white_themejpg + theme(legend.position = "right",legend.justification = "left",legend.key.height = unit(1,"cm"),legend.text.align = 0,
-                         legend.text=element_text(size=12),
-                         legend.title = element_text(size=14 ,face="bold"))+#,legend.margin=margin(l=-3))+
-  guides(fill = guide_legend(override.aes = list(size=4))) 
-
-bmnut
-
-#Export Figure 2
-p <- grid.arrange(nutscore2,
-                  legend,
-                  bm,ns2,
-                  ncol=2, nrow = 3, 
-                  layout_matrix = rbind(c(1,1), c(2,2),c(3,4)),
-                  widths = c(3, 3), heights = c(1.5,0.1,1))
-
-
-# Add labels to the arranged plots
-library(ggpubr)
-
-final <- as_ggplot(p) + # transform to a ggplot
-  draw_plot_label(label = c("A", "B", "C"), size = 15,
-                  x = c(0, 0, 0.5), y = c(1, 0.5, 0.5)) # Add labels
-final
 
 #regional boxplots with dots
+
+#compute global average
+world_avg <- dat %>%
+  summarize(meanns = mean(nutrient_score, na.rm = TRUE)) %>%
+  pull(meanns)
+
+#Amend country names
+
+plyr::revalue(dat$Larger, c("British Indian Ocean Territory" = "BIOT",
+                            "Federated States of Micronesia" = "Micronesia",
+                            "Netherlands Antilles" ="ANT",
+                            "Commonwealth of the Northern Mariana Islands" = "MNP",
+                            #"Comoro Islands"="Comoros",
+                            'Papua New Guinea' = 'PNG',
+                            "Marshall Islands"="Marshall Isl.",
+                            "Solomon Islands"="Solomon Isl.",
+                            "Cayman Islands"="Cayman Isl.")) -> dat$Larger
 
 IO <- ggplot(dat %>% filter(region=='Indian Ocean'), aes(x=reorder(Larger, nutrient_score, decreasing=F), y = nutrient_score, color = nutrient_score)) +
   coord_flip() +
@@ -207,15 +193,15 @@ WA <- ggplot(dat %>% filter(region=='Western Atlantic'), aes(x=reorder(Larger, n
 
 WA 
 
-#reverse size scale
-p2 <- grid.arrange(nutscoreR2,
+#Arrange plots
+p <- grid.arrange(nutscore,
                    IO, IP, CP, WA,
                    ncol=4, nrow = 2, 
                    layout_matrix = rbind(c(1,1,1,1), c(2,3,4,5)),
                    heights = c(1.4,1))
 
 
-final <- as_ggplot(p2) + # transform to a ggplot
+final <- as_ggplot(p) + # transform to a ggplot
   draw_plot_label(label = c("A", "B", "C", "D", "E"), size = 15,
                   x = c(0, 0, 0.25 ,0.5, 0.75), y = c(1, 0.45, 0.45,0.45,0.45))  # Add labels
 
@@ -237,11 +223,7 @@ globaldistri <- ggplot(dat, aes(nutrient_score)) +
         panel.background = element_rect(fill = "transparent", colour = NA),
         plot.background = element_rect(fill = "transparent", colour = NA))
 
-#globaldistri
-
-#library(cowplot)
-
-emb <- ggdraw(nutscoreR2) +
+emb <- ggdraw(nutscore) +
   draw_plot(
     {
       globaldistri
@@ -269,7 +251,7 @@ final <- as_ggplot(p2) + # transform to a ggplot
 ff <- annotate_figure(final,
                       bottom= text_grob("Micronutrient density (%)",  size = 14))
 
-tiff("/Volumes/EM2T/Lancaster/Nutrition/SERF/nutrient_value/dag-based/Figure1_ReverseTestEmbedded.tiff", width=4800, height=2600, compression="lzw", res=300) 
+tiff("figures/Figure1.tiff", width=2400, height=1300, compression="lzw", res=150) 
 ff
 graphics.off()
 
