@@ -12,9 +12,8 @@ library(cowplot)
 
 here()
 
-load('dat.RData')
-head(dat)
-dat <- dat[-which(dat$BWnut3A==0),]
+load('data/data_for_models.RData')
+dat <- data_for_models %>% filter(nutrient_score>0) #remove site with nutrient_score=0 (zero target fish biomass)
 
 #customized theme 
 thememap<-theme(axis.text=element_text(colour="black"),
