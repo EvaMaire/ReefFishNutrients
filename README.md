@@ -2,10 +2,6 @@
 
 Data, statistical analyses, and R scripts accompanying Maire et al. Managing nutrition-biodiversity trade-offs on coral reefs, 2024, Current Biology.
 
-# Goal
-
-Provide updated and reproducible framework to compute travel time and human gravity at 1km-resolution globally   
-
 # Content
 
 :file_folder:[data](/data) contains .csv and .RData files of data
