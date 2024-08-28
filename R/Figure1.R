@@ -46,7 +46,7 @@ nutscore <- ggplot() +
   geom_point(data = dat %>% filter(nutrient_score<nsq2 & nutrient_score>=nsq1), aes(x=Site_Long2, y=Site_Lat, colour = nutrient_score), pch=16, size= 7, alpha=.6)+
   #lowest values - bottom quartile
   geom_point(data = dat %>% filter(nutrient_score<nsq1), aes(x=Site_Long2, y=Site_Lat, colour = nutrient_score), pch=16, size= 3, alpha=.6)+
-  scale_colour_gradientn(name = "Micronutrient density\nof a 100g portion, %\n", colours = rev(myPalette(100)),
+  scale_colour_gradientn(name = "Micronutrient density, %\n", colours = rev(myPalette(100)),
                          limits=c(5,35),breaks=c(5,10,15,20,25,30,35),
                          labels=c(expression(paste("5 ", italic("(less nutritious)"))),
                                   "10","15","20","25","30",
@@ -55,17 +55,18 @@ nutscore <- ggplot() +
   annotate("text", x = 150, y = 2, label = "Indo-Pacific",size=5) +
   annotate("text", x = 200, y = 12, label = "Central Pacific",size=5) +
   annotate("text", x = 315, y = 15, label = "Western\nAltantic",size=5) +
-  #scale_size_area(breaks=quantile(dat$nutrient_score)[-5], max_size=4, name='')+
+  #scale_size_area(breaks=quantile(dat$BWnut3A)[-5], max_size=4, name='')+
   scale_x_continuous("longitude",breaks=c(80,180,280),labels=c(-100,0,100))+
-  scale_y_continuous("latitude",breaks=c(-20,-10,0,10,20))+
+  scale_y_continuous("latitude",breaks=c(-30,-20,-10,0,10,20,30))+
   thememap + guides(size = "none") + theme(legend.justification = "left",legend.key.height = unit(1.3,"cm"),legend.text.align = 0,
-                                           legend.text=element_text(size=11),
-                                           legend.title = element_text(size=12 ,face="bold")#,legend.margin=margin(l=-3))
+                                           legend.text=element_text(size=12),
+                                           legend.title = element_text(size=14 ,face="bold")#,legend.margin=margin(l=-3))
   )
+
 
 nutscore 
 
-#Customise legend
+#regional boxplots with dots
 white_themejpg <-theme(axis.ticks=element_line(colour="black"),
                        axis.text=element_text(size=12,colour="black"),
                        axis.title=element_text(size=14),
@@ -82,35 +83,12 @@ level_order <- c("Indian Ocean","Indo-Pacific","Central Pacific","Western Atlant
 
 dat$region <- factor(dat$region, levels=level_order)
 
-reg.cols <-c('cCentral Pacific'='#ffa31a', 'bIndo-Pacific'='#800a33', 'dWestern Atlantic'='#120b96', 'aIndian Ocean'='#0f7280')
-
-pleg <- ggplot(dat, aes(nutrient_score, fill = factor(region, levels=c("Indian Ocean","Indo-Pacific","Central Pacific","Western Atlantic")),
-                        color= factor(region, levels=c("Indian Ocean","Indo-Pacific","Central Pacific","Western Atlantic")) )) +
-  geom_vline(xintercept=mean(dat$nutrient_score),linetype="dashed",colour="dark grey",size=0.5)+
-  geom_density(alpha = .3)+
-  scale_fill_manual(values=reg.cols,name="",breaks=c("Indian Ocean","Indo-Pacific","Central Pacific","Western Atlantic"))+
-  scale_color_manual(values=reg.cols,name="",breaks=c("Indian Ocean","Indo-Pacific","Central Pacific","Western Atlantic"))+
-  scale_x_continuous("Nutrient density score (%)",breaks=seq(20,110,10))+
-  scale_y_continuous("Density")+
-  white_themejpg
-
-
-legend <- get_legend(
-  pleg + 
-    theme(legend.position = "top",legend.justification = "center",legend.direction = "horizontal",
-          legend.text=element_text(size=14),legend.title = element_text(size=18 ,face="bold"),legend.key.width = unit(3,"line"))
-)
-
-
-#regional boxplots with dots
-
 #compute global average
 world_avg <- dat %>%
   summarize(meanns = mean(nutrient_score, na.rm = TRUE)) %>%
   pull(meanns)
 
-#Amend country names
-
+#Rename some countries 
 plyr::revalue(dat$Larger, c("British Indian Ocean Territory" = "BIOT",
                             "Federated States of Micronesia" = "Micronesia",
                             "Netherlands Antilles" ="ANT",
@@ -193,23 +171,7 @@ WA <- ggplot(dat %>% filter(region=='Western Atlantic'), aes(x=reorder(Larger, n
 
 WA 
 
-#Arrange plots
-p <- grid.arrange(nutscore,
-                   IO, IP, CP, WA,
-                   ncol=4, nrow = 2, 
-                   layout_matrix = rbind(c(1,1,1,1), c(2,3,4,5)),
-                   heights = c(1.4,1))
-
-
-final <- as_ggplot(p) + # transform to a ggplot
-  draw_plot_label(label = c("A", "B", "C", "D", "E"), size = 15,
-                  x = c(0, 0, 0.25 ,0.5, 0.75), y = c(1, 0.45, 0.45,0.45,0.45))  # Add labels
-
-ff <- annotate_figure(final,
-                      bottom= text_grob("Micronutrient density (%)",  size = 14))
-
-
-#Try to embed a miniature distribution
+#Try to embed a miniature distribution in the 1st panel
 globaldistri <- ggplot(dat, aes(nutrient_score)) +
   geom_vline(xintercept=world_avg,linetype="dashed",colour="dark grey",size=.5)+
   geom_density(alpha = .3,colour='dark grey',size=1)+
@@ -223,19 +185,21 @@ globaldistri <- ggplot(dat, aes(nutrient_score)) +
         panel.background = element_rect(fill = "transparent", colour = NA),
         plot.background = element_rect(fill = "transparent", colour = NA))
 
+
 emb <- ggdraw(nutscore) +
   draw_plot(
     {
       globaldistri
     },
     # The distance along a (0,1) x-axis to draw the left edge of the plot
-    x = 0.585, 
+    x = 0.56, 
     # The distance along a (0,1) y-axis to draw the bottom edge of the plot
-    y = 0.15,
+    y = 0.2,
     # The width and height of the plot expressed as proportion of the entire ggdraw object
     width = 0.15, 
     height = 0.3)
 
+#Arrange plots
 p2 <- grid.arrange(emb,
                    IO, IP, CP, WA,
                    ncol=4, nrow = 2, 
@@ -249,9 +213,11 @@ final <- as_ggplot(p2) + # transform to a ggplot
                   x = c(0, 0, 0.25 ,0.5, 0.75), y = c(1, 0.45, 0.45,0.45,0.45))  # Add labels
 
 ff <- annotate_figure(final,
-                      bottom= text_grob("Micronutrient density (%)",  size = 14))
+                      bottom= text_grob("Micronutrient density (%)",  size = 15)) & 
+  theme(plot.tag = element_text(size = 16,face = 'bold'))
 
-tiff("figures/Figure1.tiff", width=2400, height=1300, compression="lzw", res=150) 
+
+jpeg("figures/Figure1.tiff", res=300, width=4800, height=2600)
 ff
 graphics.off()
 
