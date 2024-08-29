@@ -217,8 +217,8 @@ ff <- annotate_figure(final,
   theme(plot.tag = element_text(size = 16,face = 'bold'))
 
 
-jpeg("figures/Figure1.tiff", res=300, width=4800, height=2600)
+jpeg("figures/Figure1.jpeg", res=300, width=4800, height=2600)
 ff
 graphics.off()
 
-#END
+s#END

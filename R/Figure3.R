@@ -1,346 +1,209 @@
-#compute biodiversity levels
+######################
+## LIBRARY PACKAGES ##
+######################
 
-setwd("/Volumes/EM2T/Lancaster/Nutrition/SERF/nutrient_value/dag-based")
-library(ggplot2)
+library(bayestestR)
+library(brms)
+library(bayesplot)
+library(parallel)
+library(rstan)
 library(tidyverse)
-#library(mapdata)
-library(plot3D)
-library(RColorBrewer)
+library(dplyr)
+library(here)
 library(patchwork)
-library(viridis)
-library(ggrepel)
-library(gridExtra)
-library(ggExtra)
-library(cowplot)
+library(rethinking)
 
-load('dat.RData')
-head(dat)
+here()
 
-#remove 1 site which has no target biomass
-dat <- dat[-which(dat$BWnut3A==0),]
+##############################
+## IMPORT ALL FITTED MODELS ##
+##############################
 
-load('/Volumes/EM2T/Lancaster/Nutrition/SERF/nutrient_value/fd.RData')
-#load('/Volumes/EM2T/Lancaster/Nutrition/SERF/nutrient_value/pd.Rdata')
+biomass_model <- readRDS("outputs/biomass_model.rds")
+biomass_post <- as.data.frame(as.matrix(biomass_model)) %>%
+  select('b_biomass')
 
-UniqueSite <- rownames(fd)
-fd <- data.frame(fd,UniqueSite)
+PC1_model <- readRDS("outputs/PC1_model.rds")
+PC1_post <- as.data.frame(as.matrix(PC1_model)) %>%
+  select('b_PC1')
 
-#UniqueSite <- rownames(pd)
-#pd <- data.frame(pd,UniqueSite)
+PC2_model <- readRDS("outputs/PC2_model.rds")
+PC2_post <- as.data.frame(as.matrix(PC2_model)) %>%
+  select('b_PC2')
 
-#biodiv <- merge(fd,pd,by="UniqueSite",all.x=T)
+fishdiversity_model <- readRDS("outputs/fishdiversity_model.rds")
+fishdiversity_post <- as.data.frame(as.matrix(fishdiversity_model)) %>%
+  select('b_fishdiversity')
 
-final <- merge(dat,fd,by="UniqueSite",all.x=T)
+gravity_model <- readRDS("outputs/gravity_model.rds")
+gravity_post <- as.data.frame(as.matrix(gravity_model)) %>%
+  select('b_gravity')
 
-#plot(final$Phyl_Ric,final$BWnut3A)
-#plot(final$Func_Ric,final$BWnut3A)
+depth_model <- readRDS("outputs/depth_model.rds")
+depth_post <- as.data.frame(as.matrix(depth_model)) %>%
+  select('b_depth>10m','b_depth0M4m')
 
-#plot(final$Phyl_Ent,final$BWnut3A)
-#plot(final$Func_Ent,final$BWnut3A)
+NPP_model <- readRDS("outputs/NPP_model.rds")
+NPP_post <- as.data.frame(as.matrix(NPP_model)) %>%
+  select('b_NPP')
 
+meantemp_model <- readRDS("outputs/meantemp_model.rds")
+meantemp_post <- as.data.frame(as.matrix(meantemp_model)) %>%
+  select('b_meantemp')
+
+HDI_model <- readRDS("outputs/HDI_model.rds")
+HDI_post <- as.data.frame(as.matrix(HDI_model)) %>%
+  select('b_HDI')
+
+MPA_model <- readRDS("outputs/MPA_model.rds")
+MPA_post <- as.data.frame(as.matrix(MPA_model)) %>%
+  select('b_MPARestricted','b_MPAUnfishedHigh')
+
+dhw_model <- readRDS("outputs/dhw_model.rds")
+dhw_post <- as.data.frame(as.matrix(dhw_model)) %>%
+  select('b_maxdhw')
+
+bwsize_model <- readRDS("outputs/bwsize_model.rds")
+bwsize_post <- as.data.frame(as.matrix(bwsize_model)) %>%
+  select('b_bw_size')
+
+voice_model <- readRDS("outputs/voice_model.rds")
+voice_post <- as.data.frame(as.matrix(voice_model)) %>%
+  select('b_voice')
+
+geomorphology_model <- readRDS("outputs/geomorphology_model.rds")
+geomorphology_post <- as.data.frame(as.matrix(geomorphology_model)) %>%
+  select('b_geomorphologyCrest','b_geomorphologyFlat','b_geomorphologyLagoon_Backreef')
+
+wave_energy_model <- readRDS("outputs/wave_energy_model.rds")
+wave_energy_post <- as.data.frame(as.matrix(wave_energy_model)) %>%
+  select('b_wave_energy')
+
+###############################################
+## RECOMBINE DAG MODELS AND RENAME VARIABLES ##
+###############################################
+
+dag_output <- data.frame(biomass_post,PC1_post,PC2_post,
+                         fishdiversity_post,gravity_post,
+                         depth_post,NPP_post,meantemp_post,
+                         HDI_post,MPA_post,dhw_post,bwsize_post,voice_post,
+                         geomorphology_post,wave_energy_post)
+
+names(dag_output) <- gsub("b_", "", names(dag_output))
+
+dag_output <- dag_output %>%
+  rename('Fish biomass'=biomass ,
+         "Trophic composition (PC1): HD (+) / PK (-)"=PC1,
+         "Trophic composition (PC2): PS (+) / IM (-)"=PC2,
+         'Species richness'=fishdiversity  ,
+         'Human gravity'=gravity ,
+         'Deep reef: >10m'=depth.10m ,
+         'Shallow reef: 0-4m'=depth0M4m ,      
+         'Ocean productivity'=NPP  ,
+         'SST (mean)'=meantemp ,
+         'Restricted fishing'=MPARestricted ,
+         'Marine reserve'=MPAUnfishedHigh  ,     
+         'DHW'=maxdhw    ,
+         'Fish size'=bw_size,
+         'Voice and accountability'=voice ,
+         'Reef flat'=geomorphologyFlat ,
+         'Lagoon'=geomorphologyLagoon_Backreef ,
+         'Reef crest'=geomorphologyCrest,
+         'Wave energy' = wave_energy)
+
+dag_estimates <- data.frame(median=apply(dag_output, 2, median))
+dag_estimates$abs_effect <- abs(dag_estimates$median)
+dag_estimates <- dag_estimates %>%
+  arrange(desc(abs_effect))
+
+dag_output <- dag_output[,order(match(colnames(dag_output), rownames(dag_estimates)))]
+
+post <- dag_output
+
+test <- mcmc_intervals_data(dag_output, prob = 0.5,
+                            prob_outer = 0.9,
+                            point_est = c("median") )
+
+HPDI_1 <- data.frame(test)
+HPDI_1 <- HPDI_1 %>% select(!c(outer_width:point_est))
+names(HPDI_1)<-c("Var","ll0.05","ll0.25","median","ul0.75","ul0.95")
+rownames(HPDI_1) <- HPDI_1$Var
+
+HPDI_1$abs <- abs(HPDI_1$median)
+HPDI_1$zero50 <- ifelse(HPDI_1$ll0.25<0 & HPDI_1$ul0.75 >0,1,0)
+HPDI_1$zero95 <- ifelse(HPDI_1$ll0.05<0 & HPDI_1$ul0.95 >0,1,0)
+HPDI_1$positive <- ifelse(HPDI_1$median >0,1,0)
+HPDI_1$strong <- rep(0,nrow(HPDI_1))
+HPDI_1$strong[which(HPDI_1$zero50 == 0 & HPDI_1$zero95 == 0)] <- 1
+HPDI_1$light <- rep(0,nrow(HPDI_1))
+HPDI_1$light[which(HPDI_1$zero50 == 0 & HPDI_1$zero95 == 1)] <- 1
+HPDI_1$zero <- rep(0,nrow(HPDI_1))
+HPDI_1$zero[which(HPDI_1$zero50 == 1 & HPDI_1$zero95 == 1)] <- 1
+HPDI_1
+
+#create matrix for reference levels (Slope, Fished Areas and average depth)
+
+ref <- HPDI_1[c(1:3),]
+rownames(ref) = c("Mid-depth reef (4-10m)","Slope","Fished areas")
+ref$Var <- c("Mid-depth reef (4-10m)","Slope","Fished areas")
+ref[,c(2:13)] <- 0
+
+HPDI <- rbind(HPDI_1,ref)
+
+roworder <- rev(c("Trophic composition (PC1): HD (+) / PK (-)","Fish size","Species richness","Fish biomass","Trophic composition (PC2): PS (+) / IM (-)", #Species composition
+                  "Human gravity","Voice and accountability","HDI", 
+                  "Marine reserve","Restricted fishing","Fished areas",#management
+                  "Shallow reef: 0-4m","Deep reef: >10m","Mid-depth reef (4-10m)","Reef flat","Reef crest","Lagoon","Slope", #local env.
+                  "DHW",#"SST (range)",
+                  "SST (mean)","Wave energy","Ocean productivity"#large scale env
+)) #Method
+
+datFig <- HPDI[match(roworder,row.names(HPDI)),]
+datFig$Var <- factor(datFig$Var, levels = datFig$Var)
+
+#Set up color and size vectors
+datFig$col <- rep("white",nrow(datFig)) 
+datFig$col[which(datFig$zero == 1)] <- "white"
+datFig$col[which(datFig$positive==1 & datFig$strong==1)] <- "#006666" #dark green ( strong positive)
+datFig$col[which(datFig$positive==0 & datFig$strong==1)] <- "#862d59" #dark red (strong negative)
+datFig$col[which(datFig$positive == 1 & datFig$light == 1)] <- "#00666680" #light green
+datFig$col[which(datFig$positive == 0 & datFig$light == 1)] <- "#862d5980"
+
+datFig$size <- rep(4,nrow(datFig))
+datFig$size[which(datFig$strong==1)] <- 6
+
+datFig$shape <- rep(21,nrow(datFig))
+baseline <- c(grep("Slope",datFig$Var),grep("Mid-depth",datFig$Var),grep("Fished",datFig$Var))
+datFig$shape[baseline] <- 22
+
+datFig
+
+#PLOT
 white_themejpg <-theme(axis.ticks=element_line(colour="black"),
-                       axis.text=element_text(size=12,colour="black"),
-                       axis.title=element_text(size=14),
+                       axis.text=element_text(size=15,colour="black"),
+                       axis.title=element_text(size=18),
                        panel.grid.minor=element_blank(),
                        panel.background=element_rect(fill="white",colour="black"),
                        plot.background=element_rect(fill="transparent",colour=NA),
-                       legend.key = element_rect(fill = "white"),
-                       plot.title = element_text(hjust = 0.5))
-
-#topphylo <- quantile(final$Phyl_Ric,na.rm = T)[4]
-
-#ggplot(final, aes(Phyl_Ric,BWnut3A)) +
-  #geom_point(color="dark grey",size=2,pch=21,alpha=.6)+
-  #geom_vline(xintercept=topphylo,linetype="dashed",colour="dark grey",size=0.5)+
-  ##geom_hline(yintercept=Se_under5*0.333,linetype="dashed",colour="dark grey",size=0.5)+
-  #stat_smooth(color="dark grey",method = "loess",se=T,fullrange = F,size=1,show.legend = F) +
-  #scale_x_continuous(name = "Phylogenetic Richness",limits=c(0,25))+
-  #scale_y_continuous(name = "Micronutrient density score of a 100g portion, %")+
-  ##scale_fill_manual(name = "Protection",values=cols)+
-  #ggtitle('Nutrient density score')+
-  #white_themejpg
-
-#topphyloE <- quantile(final$Phyl_Ent,na.rm = T)[4]
-#ggplot(final, aes(Phyl_Ent,BWnut3A)) +
-  #geom_point(color="dark grey",size=2,pch=21,alpha=.6)+
-  #geom_vline(xintercept=topphyloE,linetype="dashed",colour="dark grey",size=0.5)+
-  ##geom_hline(yintercept=Se_under5*0.333,linetype="dashed",colour="dark grey",size=0.5)+
-  #stat_smooth(color="dark grey",method = "lm",se=T,fullrange = F,size=1,show.legend = F) +
-  #scale_x_continuous(name = "Phylogenetic Entropy",limits=c(0,7))+
-  #scale_y_continuous(name = "Micronutrient density score of a 100g portion, %")+
-  ##scale_fill_manual(name = "Protection",values=cols)+
-  #ggtitle('Nutrient density score')+
-  #white_themejpg
+                       legend.key = element_rect(fill = "white"))
 
 
-final$newnut <- final$BWnut3A/3
-topfunctioE <- quantile(final$Func_Ent,na.rm = T)[4]
-topnut <- quantile(final$newnut,na.rm = T)[4]
-pp <- ggplot(final, aes(Func_Ent,newnut)) +
-  geom_point(color="dark grey",size=2,alpha=.6)+
-  geom_vline(xintercept=topfunctioE,linetype="dashed",colour="dark grey",size=0.5)+
-  geom_hline(yintercept=topnut,linetype="dashed",colour="dark grey",size=0.5)+
-  stat_smooth(color="#2f3030",method = "lm",se=T,fullrange = F,size=1,show.legend = F) +
-  scale_x_continuous(name = "Trait Diversity",limits=c(0,6))+
-  scale_y_continuous(name = "Micronutrient density score of a 100g portion, %",limits=c(0,34))+
-  #scale_fill_manual(name = "Protection",values=cols)+
+effect <- ggplot(datFig ,aes(x=Var, y=median)) + 
+  geom_vline(xintercept=11.5, lwd=0.5, lty=1)+
+  geom_vline(xintercept=17.5, lwd=0.5, lty=1)+
+  geom_hline(yintercept=0, lwd=0.5, lty=2)+
+  geom_linerange(aes(x = Var,ymin = ll0.05, ymax = ul0.95),lwd=0.5)+
+  geom_linerange(aes(x = Var,ymin = ll0.25,ymax = ul0.75),lwd=1.5)+
+  geom_point(stat='identity', shape = datFig$shape,size=datFig$size, fill=datFig$col)  +
+  scale_y_continuous(breaks=c(-4,-3,-2,-1,0,1,2,3,4,5),limits=c( (min(datFig$ll0.05)+min(datFig$ll0.05)/6), max(datFig$ul0.95)+max(datFig$ul0.95)/6),name="Standardised effect on micronutrient density")+
+  scale_x_discrete(name="")+
+  coord_flip()+
   white_themejpg
 
-pp
+effect
 
-#per country
-cdata <- final %>% dplyr::select(UniqueSite,Larger,newnut,Func_Ent) %>% filter(Func_Ent>0)
-
-nations <- cdata %>% dplyr::select(UniqueSite,Larger) %>% group_by(Larger) %>% count(Larger)
-
-goodnations <- nations %>% filter(n>10)
-
-finalc <- cdata %>% filter(Larger %in% goodnations$Larger)  
-
-country <- ggplot(finalc, aes(Func_Ent,newnut,fill=Larger,colour=Larger)) +
-  geom_point(color="dark grey",size=2,alpha=.6)+
-  geom_vline(xintercept=topfunctioE,linetype="dashed",colour="dark grey",size=0.5)+
-  geom_hline(yintercept=topnut,linetype="dashed",colour="dark grey",size=0.5)+
-  #stat_smooth(color="#2f3030",method = "lm",se=T,fullrange = F,size=1,show.legend = F) +
-  scale_x_continuous(name = "Trait Diversity",limits=c(0,6))+
-  scale_y_continuous(name = "Micronutrient density score of a 100g portion, %",limits=c(0,34))+
-  scale_fill_discrete(name = "Nations")+
-  stat_smooth(method = "lm",se=T,fullrange = F,size=1,show.legend = F) +
-  white_themejpg
-
-country
-
-#Models
-mod <- lm(newnut ~ Func_Ent, data=finalc)
-summary(mod)
-
-summary(mod)$coefficients[2,1]
-
-#Mixed model
-library(lme4)
-m1 <- lmer(newnut ~ Func_Ent + (Func_Ent | Larger), finalc)
-coef <- coef(m1)$Larger
-coef %>% arrange(Func_Ent)
-summary(m1)
-
-# random intercepts model
-lmod <- lm(newnut ~ Func_Ent , data = finalc)
-            
-fm0 <- lmer(newnut ~ Func_Ent + (1 | Larger), finalc,REML = TRUE)
-
-# random intercepts and random slopes model    
-fm1 <- lmer(newnut ~ Func_Ent + (Func_Ent | Larger), finalc,REML = TRUE)
-coef %>% arrange(Func_Ent)
-# likelihood ratio test between the two models
-anova(fm0, fm1, method = "LRT")
-AIC(fm0,fm1) # Keep fm1
-
-#preds <- predictInterval(fm1, newdata = finalc, n.sims = 999)
-
-#allpred <- cbind(finalc,preds)
-allpred <- finalc
-allpred$fit <- predict(fm1) 
-allpred$lmfit <- predict(lmod)
-
-high <- c("French Polynesia","Venezuela","Australia","Seychelles","Commonwealth of the Northern Mariana Islands")
-low <- c("Belize","Marshall Islands","Netherlands Antilles","Solomon Islands","Reunion")
-
-#finalc$col <- rep("dark grey",nrow(finalc))
-#finalc$col[which((finalc$Larger %in% high)==T)] <- "blue"
-#finalc$col[which((finalc$Larger %in% low)==T)] <- "orange"
-
-allpred$type <- rep("average",nrow(allpred))
-allpred$type[which((allpred$Larger %in% high)==T)] <- "high"
-allpred$type[which((allpred$Larger %in% low)==T)] <- "low"
-
-country.cols<-c('average'= "dark grey", 
-             'low'="orange", 
-             'high'= "dark blue")
-
-tot <- c(high,low)
-
-allpred$newcountry <- allpred$Larger
-allpred$newcountry[which((allpred$Larger %in%tot)==F)] <-'other'
-
-country.cols2 <-c("French Polynesia"="#08519c",
-"Venezuela"= "#3182bd",
-"Australia"="#6baed6",
-"Seychelles"="#9ecae1",
-"Commonwealth of the Northern Mariana Islands"="#c6dbef",
-"Belize"="#993404",
-"Marshall Islands"="#d95f0e",
-"Netherlands Antilles"="#fe9929",
-"Solomon Islands"="#fec44f",
-"Reunion"="#fee391")
-
-#add position for labels
-pos <- allpred %>% dplyr::select(Larger,fit) %>% dplyr::group_by(Larger) %>% 
-                 mutate(label_ypos=max(fit))
-
-pos <- unique(pos[,c("Larger","label_ypos")])
-pos$newcountry <- pos$Larger
-
-plyr::revalue(pos$Larger, c("Netherlands Antilles" ="ANT",
-                            "Commonwealth of the Northern Mariana Islands" = "MNP",
-                            #"Comoro Islands"="Comoros",
-                            #'Papua New Guinea' = 'PNG',
-                            "Marshall Islands"="Marshall Isl."
-                            #"Solomon Islands"="Solomon Isl.",
-                            )) -> pos$Larger
-
-xpos <- c(1.18,1.35,1.3,0.7,1.7,1.2,1.25,1.2,1.7,1.3)
-ypos <- c(17,22.5,15.7,25.5,14.5,27,25.5,18,17.2,23.5)
-
-p <- ggplot(allpred, aes(Func_Ent,newnut,fill=newcountry,colour=newcountry)) +
-  geom_point(size=1,alpha=.2)+
-  geom_vline(xintercept=topfunctioE,linetype="dashed",colour="dark grey",size=0.5)+
-  geom_hline(yintercept=topnut,linetype="dashed",colour="dark grey",size=0.5)+
-  #stat_smooth(color="#2f3030",method = "lm",se=T,fullrange = F,size=1,show.legend = F) +
-  geom_line(aes(y=lmfit), color="#2f3030",size=1) +
-  scale_x_continuous(name = "Trait Diversity",limits=c(0,6))+
-  scale_y_continuous(name = "Micronutrient density score of a 100g portion, %",limits=c(0,34))+
-  scale_fill_manual(name = "Nations",values=country.cols2)+
-  scale_colour_manual(name = "Nations",values=country.cols2)+
-  geom_line(data = allpred %>% filter(newcountry != 'other'), aes(y=fit,fill=newcountry,colour=newcountry), size=2) +
-  geom_text(data = pos %>% filter(newcountry %in% tot),
-            aes(y = ypos,x=xpos, label= Larger, color=newcountry), size=5,fontface = "bold")+
-  white_themejpg + theme(legend.position = 'none') 
-
-tiff("/Volumes/EM2T/Lancaster/Nutrition/SERF/nutrient_value/dag-based/SI_figures/Fig3_Countries.tiff", width=2400, height=2400, compression="lzw", res=300) 
-p
+jpeg("figures/Figure2.jpeg", width=4000, height=2600, res=300) 
+effect
 graphics.off()
 
-
-#add threatened species
-load('/Volumes/EM2T/Lancaster/Nutrition/SERF/nutrient_value/dat_iucn_withsharks.RData')
-funct <- merge(final,dat_iucn_withsharks,by="UniqueSite")
-
-load("/Volumes/EM2T/Lancaster/Nutrition/SERF/nutrient_value/dag-based/datMEOW.RData")
-dd <- unique(datMEOW[,c("Larger","REALM")])
-dd <- dd[-2,]
-
-funct <- merge(funct,dd,by="Larger",all.x=T,all.y=F) 
-
-datfinal <- funct %>% select(UniqueSite:Larger,Protection,REALM,targetgroup:BWnut6,
-                             herbdetri:planktivore,logbm,Func_Ent,nb_sp_threatened)%>%
-  filter(targetgroup =='target') 
-
-datfinal$newnut <- datfinal$BWnut3A/3
-
-#Quantile95
-quantiles_95 <- function(x) {
-  r <- quantile(x, probs=c(0.05, 0.25, 0.5, 0.75, 0.95))
-  names(r) <- c("ymin", "lower", "middle", "upper", "ymax")
-  r
-}
-
-datfinal$nb_sp_threatened <- as.factor(datfinal$nb_sp_threatened) 
-datfinal <- datfinal %>%  mutate(nb_sp_th = recode(nb_sp_threatened,
-                                                   #'5' = '4',
-                                                   '6' = '5',
-                                                   '7' = '5'))
-
-pbox1 <- ggplot(datfinal, aes(y=BWnut3A, x=nb_sp_th)) +
-  stat_summary(fun.data = quantiles_95, geom="boxplot",fill="dark grey")+
-  #annotate("text", x = 0.6, y = 100, size=6, label = "A", fontface = c("bold")) +
-  #annotate("text", x = 4, y = 75, size=7, label = "*", fontface = c("bold")) +
-  #annotate("text", x = 1, y = 75, size=7, label = "*", fontface = c("bold")) +
-  labs(x="")+
-  scale_fill_brewer(palette="Dark2") +
-  scale_y_continuous("Micronutrient density score of a 100g portion, %") +
-  scale_x_discrete("Nb of threatened species - IUCN",labels=c("0","1","2","3","4",">5"))+
-  white_themejpg + theme(legend.position="none")
-
-pbox1
-
-boxp <- ggplot(datfinal, aes(y=newnut, x=nb_sp_th)) +
-  geom_hline(yintercept=topnut,linetype="dashed",colour="dark grey",size=0.5)+
-  stat_summary(fun.data = quantiles_95,geom="boxplot",fill="dark grey")+
-  geom_jitter(color="black", size=0.3, alpha=0.6) +
-  #stat_summary(fun="mean", geom = "crossbar",  width = 0.5)+
-  #scale_fill_viridis(discrete=T,name="Thermal regimes",labels=c("Cold","Temperate","Subtropical","Tropical")) +
-  scale_y_continuous("",limits=c(0,34))+
-  scale_x_discrete("Nb of threatened species - IUCN",labels=c("0","1","2","3","4",expression("">=5)))+
-  white_themejpg + theme(legend.position="none")
-
-boxp 
-
-library(patchwork)
-patchV2 <- ( pp + boxp ) + plot_annotation(tag_levels = 'A')
-
-tiff("/Volumes/EM2T/Lancaster/Nutrition/SERF/nutrient_value/dag-based/Figure3.tiff", width=4800, height=2600, compression="lzw", res=300) 
-patchV2
-graphics.off()
-
-#Tukey's test
-res.aov <- aov(BWnut3A ~ nb_sp_th, data = datfinal)
-#res.aov <- aov(NutScore_under5 ~ EnvTemp, data = s)
-#summary(res.aov)
-#TukeyHSD(res.aov)
-
-#kruskal.test(Climate_V.index ~ EnvTemp, data = s)
-
-par(mar=c(4.1,10,4,4))
-plot(TukeyHSD(res.aov, conf.level = 0.95),las=1, col = "red")
-
-
-#model
-mod <- glm(newnut ~ Func_Ent, data=datfinal)
-summary(mod)
-
-summary(mod)$coefficients[2,1]
-
-
-#try national averages
-datcountry <- final %>% select(Larger,Func_Ent,newnut) %>% group_by(Larger) %>%
-  summarise(across(Func_Ent:newnut, list(mean = ~mean(.x),
-                                          min = ~min(.x),
-                                         max = ~max(.x))))
-
-load("/Volumes/EM2T/Lancaster/Nutrition/SERF/nutrient_value/dag-based/datMEOW.RData")
-dd <- unique(datMEOW[,c("Larger","REALM")])
-dd <- dd[-2,]
-
-dat <- merge(datcountry,dd,by="Larger",all.x=T,all.y=F) 
-dat <- dat %>% mutate(region = recode(REALM, 
-                                      "Eastern Indo-Pacific"="Central Pacific",
-                                      "Central Indo-Pacific" = "Indo-Pacific",
-                                      "Tropical Atlantic" = "Western Atlantic",
-                                      "Western Indo-Pacific" = "Indian Ocean"))
-
-plyr::revalue(dat$Larger, c("British Indian Ocean Territory" = "BIOT",
-                            "Federated States of Micronesia" = "Micronesia",
-                            "Netherlands Antilles" ="ANT",
-                            "Commonwealth of the Northern Mariana Islands" = "MNP",
-                            "Comoro Islands"="Comoros",
-                            'Papua New Guinea' = 'PNG',
-                            "Marshall Islands"="Marshall Isl.",
-                            "Solomon Islands"="Solomon Isl.",
-                            "Cayman Islands"="Cayman Isl.")) -> dat$Larger
-
-# Classic ggplot
-p <- ggplot(dat,aes(x=Func_Ent_mean, y=newnut_mean, text=Larger)) +
-  geom_point(alpha=0.7) +
-  geom_errorbar(aes(ymin = newnut_min,ymax = newnut_max),color='dark grey') + 
-  geom_errorbarh(aes(xmin = Func_Ent_min ,xmax = Func_Ent_max),color='dark grey')+
-  geom_vline(xintercept=topfunctioE,linetype="dashed",colour="dark grey",size=0.5)+
-  geom_hline(yintercept=topnut,linetype="dashed",colour="dark grey",size=0.5)+
-  scale_x_continuous(name = "Trait Diversity",limits=c(0,6))+
-  scale_y_continuous(name = "Micronutrient density score, %",limits=c(0,34))+
-  #scale_fill_manual(name = "Protection",values=cols)+
-  geom_text_repel(data = dat , aes(label=Larger), size = 6,
-                  direction = "both",
-                  max.overlaps = 100)+
-                  # Add extra padding around each text label.
-                  #box.padding = unit(.55, 'cm'))+
-  white_themejpg +
-  facet_wrap(~REALM)
-
-p
-
-jpeg("/Volumes/EM2T/Lancaster/Nutrition/SERF/nutrient_value/dag-based/SI_figures/Potential_Fig4.jpeg", res=300, width=4000, height=4000)
-p             
-graphics.off()
-
-#end
-
+#END
