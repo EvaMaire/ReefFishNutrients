@@ -25,16 +25,56 @@ here()
 ##   IMPORT AND CLEAN DATA   ##
 ###############################
 
-load("data/data_for_models.RData")
+load('data/reefdata.RData')
+dat <- reefdata %>% filter(nutrient_score>0) #remove site with nutrient_score=0 (zero target fish biomass)
 
-#remove 1 site with no target biomass (nutrient_score = 0)
-hist(data_for_models$nutrient_score) 
-bayes_model <- data_for_models %>% filter(nutrient_score >0) 
-hist(bayes_model$nutrient_score) #normal distribution
+#log-transform data
+dat$human_gravity[which(is.na(dat$human_gravity))] <- 0 # gravity is assumed to be 0 when there is no population within 500km-buffer 
+dat$loggrav <- log(dat$human_gravity+1)
+dat$logNPP <- log(dat$meanNPP)
+dat$logbm <- log(dat$bm_kg_ha+1)
 
-#standardise all covariates
-bayes_model[,c(9:ncol(bayes_model))] <- sapply(bayes_model[,c(9:ncol(bayes_model))], function(i){(i-mean(i, na.rm=T))/(2*sd(i, na.rm=T))} )
-summary(bayes_model) #no missing values - OK
+#Replace NAs
+dat$wave_energy[which(is.na(dat$wave_energy)==T)] <- mean(dat$wave_energy[which(is.na(dat$wave_energy)==F)])
+
+#Factors
+dat$depth<-as.factor(dat$depth)
+dat$CensusMethod <- as.factor(dat$CensusMethod)
+dat$MPA<-as.factor(dat$MPA)
+dat$geomorphology<-as.factor(dat$geomorphology)
+
+dat$depth=relevel(dat$depth,ref="4-10m")
+dat$CensusMethod=relevel(dat$CensusMethod,ref="Standard belt transect")
+dat$MPA=relevel(dat$MPA,ref="Fished")
+dat$geomorphology=relevel(dat$geomorphology,ref="Slope")
+
+#rename
+bayes_model <- dat %>% rename(NPP = logNPP,
+                              gravity = loggrav,
+                              biomass = logbm,
+                              voice = Voice_accountability)
+
+
+summary(bayes_model)
+
+#check missing data
+sapply(bayes_model, function(x) paste(round(sum(is.na(x))/length(x),2)*100,"%",sep=""))
+
+#standardise
+bayes_model <- dplyr::mutate(bayes_model,
+                             abs_latitude = abs(Site_Lat))
+
+bayes_model <- bayes_model %>% dplyr::select(UniqueSite,ReefCluster,Larger,CensusMethod,
+                                             abs_latitude,MPA,geomorphology,depth,nutrient_score,
+                                             Total_sampling_area,NPP,HDId,fishdiversity,voice,wave_energy,biomass,
+                                             maxdhw,meantemp,bw_size,gravity,PC1,PC2)
+
+
+#standardised metric for species richness
+bayes_model$fishdiversityst <- bayes_model$fishdiversity/(log(bayes_model$Total_sampling_area))
+
+bayes_model[,c(10:ncol(bayes_model))] <- sapply(bayes_model[,c(10:ncol(bayes_model))], function(i){(i-mean(i, na.rm=T))/(2*sd(i, na.rm=T))} )
+summary(bayes_model)
 
 ##################################
 ## PARALLEL SETTINGS FOR MODELS ##
@@ -52,7 +92,8 @@ biomass_model_formula <-
   bf(nutrient_score ~ biomass +
        bw_size +
        PC1+PC2+ 
-       meantemp+
+       meantemp + 
+       CensusMethod + Total_sampling_area +
        (1 | Larger/ReefCluster),
      family=gaussian()) 
 
@@ -62,7 +103,7 @@ biomass_model <- brm(biomass_model_formula,
                      c(set_prior("normal(0,3)", class = "b"),
                        set_prior("normal(0,3)", class="Intercept")))
 
-saveRDS(biomass_model, "output/biomass_model.rds")
+saveRDS(biomass_model, "outputs/biomass_model.rds")
 
 ##############################
 ## FISH COMPO MODEL 1 - PC1 ##
@@ -70,16 +111,17 @@ saveRDS(biomass_model, "output/biomass_model.rds")
 
 PC1_model_formula <- 
   bf(nutrient_score ~ PC1 +
-       fishdiversity+
-       geomorphology +
+       biomass +
+       bw_size +
+       meantemp +
        (1 | Larger/ReefCluster),
      family=gaussian()) 
 
 PC1_model <- brm(PC1_model_formula,
-                     data=bayes_model,
-                     chains=3, iter=2000, cores=ncores,
-                     c(set_prior("normal(0,3)", class = "b"),
-                       set_prior("normal(0,3)", class="Intercept")))
+                 data=bayes_model,
+                 chains=3, iter=2000, cores=ncores,
+                 c(set_prior("normal(0,3)", class = "b"),
+                   set_prior("normal(0,3)", class="Intercept")))
 
 saveRDS(PC1_model, "outputs/PC1_model.rds")
 
@@ -87,10 +129,10 @@ saveRDS(PC1_model, "outputs/PC1_model.rds")
 ## FISH COMPO MODEL 2 - PC2 ##
 ##############################
 
-PC2_model_formula <- 
-  bf(nutrient_score ~ PC2 +
-       fishdiversity+
-       geomorphology +
+PC2_model_formula <- bf(nutrient_score ~ PC2 +
+       biomass +
+       bw_size +
+       meantemp+
        (1 | Larger/ReefCluster),
      family=gaussian()) 
 
@@ -100,21 +142,24 @@ PC2_model <- brm(PC2_model_formula,
                  c(set_prior("normal(0,3)", class = "b"),
                    set_prior("normal(0,3)", class="Intercept")))
 
+
 saveRDS(PC2_model, "outputs/PC2_model.rds")
 
 #######################
 ##  DIVERSITY MODEL  ##
 #######################
 
-fishdiversity_model_formula <-   bf(nutrient_score ~ fishdiversity +
-       (1 | Larger/ReefCluster),
-     family=gaussian()) 
+fishdiversity_model_formula <- bf(nutrient_score ~ fishdiversityst +
+                                      CensusMethod +
+                                      MPA + NPP + depth + maxdhw + geomorphology + meantemp +
+                                      (1 | Larger/ReefCluster),
+                                    family=gaussian()) 
 
 fishdiversity_model <- brm(fishdiversity_model_formula,
-                       data=bayes_model,
-                       chains=3, iter=2000, cores=ncores,
-                       c(set_prior("normal(0,3)", class = "b"),
-                         set_prior("normal(0,3)", class="Intercept")))
+                           data=bayes_model,
+                           chains=3, iter=2000, cores=ncores,
+                           c(set_prior("normal(0,3)", class = "b"),
+                             set_prior("normal(0,3)", class="Intercept")))
 
 saveRDS(fishdiversity_model, "outputs/fishdiversity_model.rds")
 
@@ -122,9 +167,9 @@ saveRDS(fishdiversity_model, "outputs/fishdiversity_model.rds")
 ## GRAVITY MODEL ##
 ###################
 
-gravity_model_formula <- bf(nutrient_score ~ gravity +
-                              HDI +
-                              abs_latitude + # ABSOLUTE VALUE FOR LINEARITY
+gravity_model_formula <- bf(nutrient_score ~ gravity + 
+                              #MPA +
+                              abs_latitude  + # ABSOLUTE VALUE FOR LINEARITY
                               (1 | Larger/ReefCluster),
                             family=gaussian())
 
@@ -156,7 +201,8 @@ saveRDS(depth_model, "outputs/depth_model.rds")
 ## NPP MODEL ##
 ###############
 
-NPP_model_formula <- bf(nutrient_score ~ NPP +
+NPP_model_formula <- bf(nutrient_score ~ NPP + 
+                          abs_latitude + wave_energy + 
                           (1 | Larger/ReefCluster),
                         family=gaussian())
 
@@ -172,40 +218,26 @@ saveRDS(NPP_model, "outputs/NPP_model.rds")
 ## SST  MODEL ##
 ################
 
-meantemp_model_formula <- bf(nutrient_score ~ meantemp +
-                          (1 | Larger/ReefCluster), 
-                        family=gaussian())
+meantemp_model_formula <- bf(nutrient_score ~ meantemp + 
+                               abs_latitude +
+                               (1 | Larger/ReefCluster), 
+                             family=gaussian())
 
 meantemp_model <- brm(meantemp_model_formula,
-                 data=bayes_model,
-                 chains=3, iter=2000, cores=ncores,
-                 c(set_prior("normal(0,3)", class = "b"),
-                   set_prior("normal(0,3)", class="Intercept")))
+                      data=bayes_model,
+                      chains=3, iter=2000, cores=ncores,
+                      c(set_prior("normal(0,3)", class = "b"),
+                        set_prior("normal(0,3)", class="Intercept")))
 
 saveRDS(meantemp_model, file= "outputs/meantemp_model.rds")
-
-######################
-## SST RANGE  MODEL ##
-######################
-
-rangetemp_model_formula <- bf(nutrient_score ~ rangetemp +
-                          (1 | Larger/ReefCluster), 
-                        family=gaussian())
-
-rangetemp_model <- brm(rangetemp_model_formula,
-                 data=bayes_model,
-                 chains=3, iter=2000, cores=ncores,
-                 c(set_prior("normal(0,3)", class = "b"),
-                   set_prior("normal(0,3)", class="Intercept")))
-
-saveRDS(rangetemp_model, file= "outputs/rangetemp_model.rds")
 
 #################
 ## HDI   MODEL ##
 #################
 
-HDI_model_formula <- bf(nutrient_score ~ HDI + gravity +
+HDI_model_formula <- bf(nutrient_score ~ HDId + 
                           abs_latitude + # ABSOLUTE VALUE FOR LINEARITY
+                          voice + 
                           (1 | Larger/ReefCluster),
                         family=gaussian())
 
@@ -215,15 +247,14 @@ HDI_model <- brm(HDI_model_formula,
                  c(set_prior("normal(0,3)", class = "b"),
                    set_prior("normal(0,3)", class="Intercept")))
 
-saveRDS(HDI_model, "outputs/HDI_model.rds")
+saveRDS(HDI_model, "outputs/HDId_model.rds")
 
 ###############
 ## MPA MODEL ##
 ###############
 
-MPA_model_formula  <- bf(nutrient_score ~ MPA +
-                           HDI +
-                           voice +
+MPA_model_formula  <- bf(nutrient_score ~ MPA + 
+                           abs_latitude +
                            (1 | Larger/ReefCluster),
                          family=gaussian())
 
@@ -256,14 +287,15 @@ saveRDS(dhw_model, "outputs/dhw_model.rds")
 ###################
 
 bwsize_model_formula <- bf(nutrient_score ~ bw_size +
-                          (1 | Larger/ReefCluster),
-                        family=gaussian())
+                             MPA + depth +
+                             (1 | Larger/ReefCluster),
+                           family=gaussian())
 
 bwsize_model <- brm(bwsize_model_formula,
-                 data=bayes_model,
-                 chains=3, iter=2000, cores=ncores,
-                 c(set_prior("normal(0,3)", class = "b"),
-                   set_prior("normal(0,3)", class="Intercept")))
+                    data=bayes_model,
+                    chains=3, iter=2000, cores=ncores,
+                    c(set_prior("normal(0,3)", class = "b"),
+                      set_prior("normal(0,3)", class="Intercept")))
 
 saveRDS(bwsize_model, "outputs/bwsize_model.rds")
 
@@ -271,16 +303,16 @@ saveRDS(bwsize_model, "outputs/bwsize_model.rds")
 ## VOICE MODEL ##
 #################
 
-voice_model_formula <- bf(nutrient_score ~ voice +
-                            HDI +
-                             (1 | Larger/ReefCluster),
-                           family=gaussian())
+voice_model_formula <- bf(nutrient_score ~ voice + 
+                            abs_latitude +
+                            (1 | Larger/ReefCluster),
+                          family=gaussian())
 
 voice_model <- brm(voice_model_formula,
-                    data=bayes_model,
-                    chains=3, iter=2000, cores=ncores,
-                    c(set_prior("normal(0,3)", class = "b"),
-                      set_prior("normal(0,3)", class="Intercept")))
+                   data=bayes_model,
+                   chains=3, iter=2000, cores=ncores,
+                   c(set_prior("normal(0,3)", class = "b"),
+                     set_prior("normal(0,3)", class="Intercept")))
 
 saveRDS(voice_model, "outputs/voice_model.rds")
 
@@ -290,14 +322,14 @@ saveRDS(voice_model, "outputs/voice_model.rds")
 
 geomorphology_model_formula <- bf(nutrient_score ~ geomorphology +
                                     depth +
-                                 (1 | Larger/ReefCluster),
-                               family=gaussian())
+                                    (1 | Larger/ReefCluster),
+                                  family=gaussian())
 
 geomorphology_model <- brm(geomorphology_model_formula,
-                        data=bayes_model,
-                        chains=3, iter=2000, cores=ncores,
-                        c(set_prior("normal(0,3)", class = "b"),
-                          set_prior("normal(0,3)", class="Intercept")))
+                           data=bayes_model,
+                           chains=3, iter=2000, cores=ncores,
+                           c(set_prior("normal(0,3)", class = "b"),
+                             set_prior("normal(0,3)", class="Intercept")))
 
 saveRDS(geomorphology_model, "outputs/geomorphology_model.rds")
 
@@ -306,15 +338,15 @@ saveRDS(geomorphology_model, "outputs/geomorphology_model.rds")
 #######################
 
 wave_energy_model_formula <- bf(nutrient_score ~  wave_energy +
-                                    depth + geomorphology +
-                                    (1 | Larger/ReefCluster),
-                                  family=gaussian()) 
+                                  depth + geomorphology +
+                                  (1 | Larger/ReefCluster),
+                                family=gaussian()) 
 
 wave_energy_model <- brm(wave_energy_model_formula,
-                           data=bayes_model,
-                           chains=3, iter=2000, cores=ncores,
-                           c(set_prior("normal(0,3)", class = "b"),
-                             set_prior("normal(0,3)", class="Intercept")))
+                         data=bayes_model,
+                         chains=3, iter=2000, cores=ncores,
+                         c(set_prior("normal(0,3)", class = "b"),
+                           set_prior("normal(0,3)", class="Intercept")))
 
 saveRDS(wave_energy_model, "outputs/wave_energy_model.rds")
 
@@ -325,12 +357,15 @@ saveRDS(wave_energy_model, "outputs/wave_energy_model.rds")
 library(dagitty)
 
 #rename variables to fit DAG: use only PC1 for fish composition
-dag <- bayes_model %>% select(!c(PC2)) %>% 
+dag <- bayes_model %>% select(!c(PC2,fishdiversity)) %>% 
   rename(fishcompo = PC1,
-         Latitude = abs_latitude, dhw = maxdhw)
+         Latitude = abs_latitude, 
+         dhw = maxdhw,HDI=HDId,
+         Management_MPA = MPA,
+         fishdiversity = fishdiversityst)
 
 #Factors: must be converted as integers
-dag$MPA <- as.integer(dag$MPA)
+dag$Management_MPA <- as.integer(dag$Management_MPA)
 dag$depth <- as.integer(dag$depth)
 dag$geomorphology <- as.integer(dag$geomorphology)
 
@@ -340,7 +375,7 @@ summary(dag)
 # make sure your online DAG has the same variable names as your data; 
 # make sure all unmeasured variables are labelled as unmeasured in the online DAG
 
-DAG <- downloadGraph("dagitty.net/mg8iVuO")
+DAG <- downloadGraph("dagitty.net/mW_c-oW") #september 19, 2023
 
 dag <- dag[,names(dag) %in% names(DAG)]
 str(dag)
