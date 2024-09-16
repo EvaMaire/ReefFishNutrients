@@ -33,7 +33,7 @@ PC2_post <- as.data.frame(as.matrix(PC2_model)) %>%
 
 fishdiversity_model <- readRDS("outputs/fishdiversity_model.rds")
 fishdiversity_post <- as.data.frame(as.matrix(fishdiversity_model)) %>%
-  select('b_fishdiversity')
+  select('b_fishdiversityst')
 
 gravity_model <- readRDS("outputs/gravity_model.rds")
 gravity_post <- as.data.frame(as.matrix(gravity_model)) %>%
@@ -51,9 +51,9 @@ meantemp_model <- readRDS("outputs/meantemp_model.rds")
 meantemp_post <- as.data.frame(as.matrix(meantemp_model)) %>%
   select('b_meantemp')
 
-HDI_model <- readRDS("outputs/HDI_model.rds")
+HDI_model <- readRDS("outputs/HDId_model.rds")
 HDI_post <- as.data.frame(as.matrix(HDI_model)) %>%
-  select('b_HDI')
+  select('b_HDId')
 
 MPA_model <- readRDS("outputs/MPA_model.rds")
 MPA_post <- as.data.frame(as.matrix(MPA_model)) %>%
@@ -83,10 +83,11 @@ wave_energy_post <- as.data.frame(as.matrix(wave_energy_model)) %>%
 ## RECOMBINE DAG MODELS AND RENAME VARIABLES ##
 ###############################################
 
-dag_output <- data.frame(biomass_post,PC1_post,PC2_post,
+dag_output <- data.frame(biomass_post,PC1_post,PC2_post,#fishcompo_post,
                          fishdiversity_post,gravity_post,
-                         depth_post,NPP_post,meantemp_post,
-                         HDI_post,MPA_post,dhw_post,bwsize_post,voice_post,
+                         depth_post,NPP_post,meantemp_post,#rangetemp_post,
+                         #port_post,
+                         MPA_post,dhw_post,bwsize_post,voice_post,HDI_post,#coralcover_post,
                          geomorphology_post,wave_energy_post)
 
 names(dag_output) <- gsub("b_", "", names(dag_output))
@@ -95,12 +96,13 @@ dag_output <- dag_output %>%
   rename('Fish biomass'=biomass ,
          "Trophic composition (PC1): HD (+) / PK (-)"=PC1,
          "Trophic composition (PC2): PS (+) / IM (-)"=PC2,
-         'Species richness'=fishdiversity  ,
+         'Species richness'=fishdiversityst,
          'Human gravity'=gravity ,
          'Deep reef: >10m'=depth.10m ,
          'Shallow reef: 0-4m'=depth0M4m ,      
-         'Ocean productivity'=NPP  ,
+         'Ocean productivity'=NPP ,
          'SST (mean)'=meantemp ,
+         'HDI'=HDId,
          'Restricted fishing'=MPARestricted ,
          'Marine reserve'=MPAUnfishedHigh  ,     
          'DHW'=maxdhw    ,
@@ -142,7 +144,6 @@ HPDI_1$zero[which(HPDI_1$zero50 == 1 & HPDI_1$zero95 == 1)] <- 1
 HPDI_1
 
 #create matrix for reference levels (Slope, Fished Areas and average depth)
-
 ref <- HPDI_1[c(1:3),]
 rownames(ref) = c("Mid-depth reef (4-10m)","Slope","Fished areas")
 ref$Var <- c("Mid-depth reef (4-10m)","Slope","Fished areas")
@@ -151,7 +152,7 @@ ref[,c(2:13)] <- 0
 HPDI <- rbind(HPDI_1,ref)
 
 roworder <- rev(c("Trophic composition (PC1): HD (+) / PK (-)","Fish size","Species richness","Fish biomass","Trophic composition (PC2): PS (+) / IM (-)", #Species composition
-                  "Human gravity","Voice and accountability","HDI", 
+                  "Human gravity","HDI","Voice and accountability",#"Human Dev. (ports)", 
                   "Marine reserve","Restricted fishing","Fished areas",#management
                   "Shallow reef: 0-4m","Deep reef: >10m","Mid-depth reef (4-10m)","Reef flat","Reef crest","Lagoon","Slope", #local env.
                   "DHW",#"SST (range)",
@@ -196,13 +197,13 @@ effect <- ggplot(datFig ,aes(x=Var, y=median)) +
   geom_linerange(aes(x = Var,ymin = ll0.25,ymax = ul0.75),lwd=1.5)+
   geom_point(stat='identity', shape = datFig$shape,size=datFig$size, fill=datFig$col)  +
   scale_y_continuous(breaks=c(-4,-3,-2,-1,0,1,2,3,4,5),limits=c( (min(datFig$ll0.05)+min(datFig$ll0.05)/6), max(datFig$ul0.95)+max(datFig$ul0.95)/6),name="Standardised effect on micronutrient density")+
-  scale_x_discrete(name="")+
+  scale_x_discrete(name="              Environmental                                Social             Ecological   \n",labels=test)+
   coord_flip()+
-  white_themejpg
+  white_themejpg 
 
 effect
 
-jpeg("figures/Figure2.jpeg", width=4000, height=2600, res=300) 
+jpeg("figures/Figure3.jpeg", width=4000, height=2600, res=300) 
 effect
 graphics.off()
 
